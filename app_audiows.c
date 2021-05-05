@@ -125,7 +125,7 @@ static int audiows_exec(struct ast_channel *chan, const char *data) {
 
             if (ast_websocket_read(websocket, &payload, &payload_len, &opcode, &fragmented)) {
                 ast_log(LOG_WARNING, "WebSocket read error: %s\n", strerror(errno));
-                return -1;
+                return 0;
             }
 
             switch (opcode) {

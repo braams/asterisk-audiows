@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"flag"
+	"fmt"
 	"log"
 	"math"
 	"net/http"
@@ -15,8 +16,8 @@ var addr = flag.String("addr", "localhost:8080", "http service address")
 
 var upgrader = websocket.Upgrader{} // use default options
 
-func syncecho(w http.ResponseWriter, r *http.Request) {
-	log.Println(r)
+func echo(w http.ResponseWriter, r *http.Request) {
+	log.Println(r.URL)
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Print("upgrade:", err)
@@ -46,7 +47,7 @@ func syncecho(w http.ResponseWriter, r *http.Request) {
 }
 
 func Sln16SynGen(samplerate float64, frequency float64) func(n int) []byte {
-	mult := math.Pow(2, 16) / 4
+	mult := math.Pow(2, 16) / 8
 	pos := 0
 
 	return func(n int) []byte {
@@ -63,8 +64,13 @@ func Sln16SynGen(samplerate float64, frequency float64) func(n int) []byte {
 	}
 }
 
+func silence(n int) []byte {
+	buf := make([]byte, n*2)
+	return buf
+}
+
 func asyncsin(w http.ResponseWriter, r *http.Request) {
-	log.Println(r)
+	log.Println(r.URL)
 	if c, err := upgrader.Upgrade(w, r, nil); err != nil {
 		log.Print("Upgrade:", err)
 		return
@@ -80,18 +86,15 @@ func asyncsin(w http.ResponseWriter, r *http.Request) {
 					case websocket.TextMessage:
 						log.Println(string(message))
 					case websocket.BinaryMessage:
-
 					default:
-
 					}
-
 				}
 			}
 		}()
 
 		nextframe := Sln16SynGen(8000, 1000)
 
-		ticker := time.NewTicker(21 * time.Millisecond)
+		ticker := time.NewTicker(20 * time.Millisecond)
 		for {
 			<-ticker.C
 			if err = c.WriteMessage(websocket.BinaryMessage, nextframe(160)); err != nil {
@@ -106,7 +109,7 @@ func asyncsin(w http.ResponseWriter, r *http.Request) {
 }
 
 func syncsin(w http.ResponseWriter, r *http.Request) {
-	log.Println(r)
+	log.Println(r.URL)
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Print("upgrade:", err)
@@ -136,13 +139,46 @@ func syncsin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+func record(w http.ResponseWriter, r *http.Request) {
+	log.Println(r.URL)
+	c, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Print("upgrade:", err)
+		return
+	}
+	defer c.Close()
+	for i := 0; i < 50; i++ {
+		mt, message, err := c.ReadMessage()
+		if err != nil {
+			log.Println("read:", err)
+			break
+		}
+		switch mt {
+		case websocket.TextMessage:
+			log.Println(string(message))
+		case websocket.BinaryMessage:
+			if err := c.WriteMessage(websocket.BinaryMessage, silence(160)); err != nil {
+				log.Println("WriteMessage:", err)
+
+			}
+
+		default:
+
+		}
+	}
+	fmt.Println("record done")
+	c.WriteMessage(websocket.CloseNormalClosure, []byte{})
+	time.Sleep(time.Second)
+
+}
 
 func main() {
 	flag.Parse()
 	log.SetFlags(0)
-	http.HandleFunc("/syncecho", syncecho)
+	http.HandleFunc("/echo", echo)
 	http.HandleFunc("/syncsin", syncsin)
 	http.HandleFunc("/asyncsin", asyncsin)
+	http.HandleFunc("/record", record)
 	log.Println("start listening at", *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
